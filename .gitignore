@@ -1,0 +1,24 @@
+# Arduino ESP32 编译产物
+build/
+*.bin
+*.elf
+*.map
+*.hex
+flash_args
+
+# 隐私密钥、WiFi配置
+*.key
+secrets.h
+wifi_config.h
+private_config.h
+
+# IDE 缓存
+.qoder/
+.vscode/
+*.swp
+*.tmp
+.DS_Store
+
+# Git 临时文件
+*.orig
+*.rej
