@@ -1,4 +1,5 @@
-# Arduino ESP32 编译产物
+# PlatformIO 构建产物
+.pio/
 build/
 *.bin
 *.elf
@@ -22,3 +23,13 @@ private_config.h
 # Git 临时文件
 *.orig
 *.rej
+# Qoder IDE 缓存目录
+.qoder-cn/
+
+# Excel临时文件
+~$*.xlsx
+*.xls
+*.xlsx
+
+# Windows非法空文件
+nul
