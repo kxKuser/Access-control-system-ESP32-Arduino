@@ -5,43 +5,35 @@
  * 核心驱动逻辑:
  *   - 状态机驱动开门/关门流程
  *   - PWM 渐变 (软启动/软停止)
- *   - FG 脉冲中断计数 + 堵转检测
+ *   - FG 堵转检测 (FG 无脉冲超过阈值则紧急停机)
  *   - 限位开关到位停机
  *   - 超时保护
+ *
+ * 硬件依赖: 全部通过 BSP 层访问
+ *   - PWM/方向/FG → bsp::motor_pwm
+ *   - 限位开关     → bsp::limits
  */
 
 #include "door_motor.h"
-#include "test_mode.h"
+#include "bsp_motor_pwm.h"
+#include "bsp_limits.h"
 
 // ==================== 全局单例 ====================
 DoorMotor g_doorMotor;
 
 // ==================== 生命周期 ====================
 void DoorMotor::init() {
-    // 配置 GPIO
-    pinMode(PIN_MOTOR_DIR, OUTPUT);
-    pinMode(PIN_MOTOR_SPEED_FB, INPUT_PULLUP);
-    digitalWrite(PIN_MOTOR_DIR, LOW);
+    // 电机硬件统一由 BSP 初始化 (方向引脚 + PWM + FG 中断)
+    // 已在 bsp::system::init() -> bsp::motor_pwm::init() 中完成
 
-    // 配置 LEDC PWM
-    ledcSetup(MOTOR_PWM_CHANNEL, MOTOR_PWM_FREQ, MOTOR_PWM_RESOLUTION);
-    ledcAttachPin(PIN_MOTOR_PWM, MOTOR_PWM_CHANNEL);
-    ledcWrite(MOTOR_PWM_CHANNEL, 0);
-
-    // 初始化状态
+    // 初始化业务状态
     state = State::IDLE;
-    currentPwm = 0;
     targetPwm = 0;
     lastRampTime = 0;
     actionStartTime = 0;
     stalled = false;
-
-    // 初始化 FG 中断
-    fgPulseCount = 0;
     prevFgPulseCount = 0;
-    lastFgCheckTime = 0;
     lastFgPulseTime = 0;
-    attachInterrupt(digitalPinToInterrupt(PIN_MOTOR_SPEED_FB), fgIsrStub, FALLING);
 
     Serial.println(F("[MOTOR] Door motor initialized"));
 }
@@ -100,9 +92,7 @@ void DoorMotor::loop() {
     rampStep();
 
     // 5. 关门慢速->快速阶段切换
-    if (state == State::CLOSING_SLOW && currentPwm >= MOTOR_SLOW_PWM) {
-        // 慢速阶段持续一段时间或一定角度后切换到快速
-        // 简化: 当 PWM 达到 MOTOR_SLOW_PWM 后继续 ramp 到 MOTOR_FAST_PWM
+    if (state == State::CLOSING_SLOW && bsp::motor_pwm::getPwm() >= MOTOR_SLOW_PWM) {
         targetPwm = MOTOR_FAST_PWM;
         state = State::CLOSING_FAST;
     }
@@ -118,11 +108,10 @@ void DoorMotor::open() {
 
     // 重置状态
     stalled = false;
-    fgPulseCount = 0;
+    bsp::motor_pwm::resetFgPulseCount();
     prevFgPulseCount = 0;
     lastFgPulseTime = millis();
     actionStartTime = millis();
-    currentPwm = 0;
 
     // 设置方向 = 正转开门
     setDirection(true);
@@ -141,11 +130,10 @@ void DoorMotor::close() {
 
     // 重置状态
     stalled = false;
-    fgPulseCount = 0;
+    bsp::motor_pwm::resetFgPulseCount();
     prevFgPulseCount = 0;
     lastFgPulseTime = millis();
     actionStartTime = millis();
-    currentPwm = 0;
 
     // 设置方向 = 反转关门
     setDirection(false);
@@ -158,8 +146,7 @@ void DoorMotor::close() {
 
 void DoorMotor::emergencyStop() {
     // 立即切断 PWM
-    ledcWrite(MOTOR_PWM_CHANNEL, 0);
-    currentPwm = 0;
+    bsp::motor_pwm::stop();
     targetPwm = 0;
     state = State::IDLE;
     actionStartTime = 0;
@@ -194,15 +181,14 @@ bool DoorMotor::isStalled() const {
     return stalled;
 }
 
+uint8_t DoorMotor::getCurrentPwm() const {
+    return bsp::motor_pwm::getPwm();
+}
+
 // ==================== 内部方法 ====================
 
 void DoorMotor::setPwm(uint8_t value) {
-    // 确保 PWM 不低于启动阈值 (除非完全停止)
-    if (value > 0 && value < MOTOR_MIN_PWM) {
-        value = MOTOR_MIN_PWM;
-    }
-    ledcWrite(MOTOR_PWM_CHANNEL, value);
-    currentPwm = value;
+    bsp::motor_pwm::setPwm(value);
 }
 
 void DoorMotor::rampStep() {
@@ -212,76 +198,59 @@ void DoorMotor::rampStep() {
     }
     lastRampTime = now;
 
+    uint8_t currentPwm = bsp::motor_pwm::getPwm();
+
     if (currentPwm < targetPwm) {
         // 上升
         uint16_t newVal = (uint16_t)currentPwm + PWM_RAMP_STEP;
         if (newVal > targetPwm) newVal = targetPwm;
         if (newVal > 255) newVal = 255;
-        setPwm((uint8_t)newVal);
+        bsp::motor_pwm::setPwm((uint8_t)newVal);
     } else if (currentPwm > targetPwm) {
         // 下降
         int16_t newVal = (int16_t)currentPwm - PWM_RAMP_STEP;
         if (newVal < targetPwm) newVal = targetPwm;
         if (newVal < 0) newVal = 0;
-        setPwm((uint8_t)newVal);
+        bsp::motor_pwm::setPwm((uint8_t)newVal);
     }
 }
 
 void DoorMotor::setDirection(bool forward) {
-    digitalWrite(PIN_MOTOR_DIR, forward ? HIGH : LOW);
+    bsp::motor_pwm::setDirection(forward);
 }
 
 // ==================== FG 堵转检测 ====================
-
-void IRAM_ATTR DoorMotor::fgIsrStub() {
-    g_doorMotor.fgIsr();
-}
-
-void IRAM_ATTR DoorMotor::fgIsr() {
-    fgPulseCount++;
-    // 不在此调用 millis(), 由 loop() 中的 checkStall() 记录时间戳
-}
 
 void DoorMotor::checkStall() {
     unsigned long now = millis();
 
     // 仅在电机运行时检测
     if (state == State::IDLE) {
-        lastFgCheckTime = now;
         return;
     }
 
-    // 刷新 FG 脉冲时间戳 (在 loop 中安全调用 millis)
-    // 通过对比上一个周期和当前周期的脉冲计数判断是否有新脉冲
-    if (fgPulseCount != prevFgPulseCount) {
+    // 从 BSP 层获取 FG 脉冲总数 (真实 + 虚拟)
+    uint32_t totalPulses = bsp::motor_pwm::getFgPulseCount();
+
+    // Delta 检测: 对比上一个周期
+    if (totalPulses != prevFgPulseCount) {
         lastFgPulseTime = now;
-        prevFgPulseCount = fgPulseCount;
+        prevFgPulseCount = totalPulses;
     }
 
-    // 测试模式下使用虚拟 FG 脉冲
-    if (g_testMode.isActive()) {
-        fgPulseCount += g_testMode.getFgPulseCount();
-        if (g_testMode.getFgPulseCount() > 0) {
-            lastFgPulseTime = now;  // 模拟脉冲更新最后脉冲时间
-        }
-        g_testMode.consumeFgPulses();
-    }
-
-    // 检查 FG 是否有脉冲
+    // 检查 FG 是否有脉冲超过堵转阈值
     unsigned long sinceLastPulse = now - lastFgPulseTime;
     if (sinceLastPulse > MOTOR_STALL_TIMEOUT) {
         stalled = true;
     }
 }
 
-// ==================== 限位开关读取 ====================
+// ==================== 限位开关读取 (通过 BSP 层) ====================
 
 bool DoorMotor::isFullOpenLimit() const {
-    if (g_testMode.isActive()) return g_testMode.getDoorFullOpenLimit();
-    return digitalRead(PIN_DOOR_FULL_OPEN) == LOW;
+    return bsp::limits::isDoorFullOpenTriggered();
 }
 
 bool DoorMotor::isClosedLimit() const {
-    if (g_testMode.isActive()) return g_testMode.getDoorClosedLimit();
-    return digitalRead(PIN_DOOR_CLOSED) == LOW;
+    return bsp::limits::isDoorClosedTriggered();
 }

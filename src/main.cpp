@@ -14,44 +14,17 @@
  * 硬件平台: ESP32-WROOM-32UE-N4
  * 开发框架: PlatformIO + Arduino (arduino-esp32)
  *
- * ============================================================
- *  DoorMotor / DoorLock 模块使用示例:
- *
- *  // 1. 完整开门流程 (先开锁再开门)
- *  if (!g_doorLock.isUnlocked()) {
- *      g_doorLock.unlock();       // 触发开锁
- *  }
- *  // 等待开锁完成 (非阻塞)
- *  if (g_doorLock.isUnlocked() && !g_doorMotor.isRunning()) {
- *      g_doorMotor.open();        // 触发开门
- *  }
- *
- *  // 2. 完整关门流程 (先关门再复位)
- *  if (!g_doorMotor.isRunning()) {
- *      g_doorMotor.close();       // 触发关门
- *  }
- *  // 等待关门完成后复位
- *  if (g_doorMotor.isDoorClosed() && g_doorLock.isUnlocked()) {
- *      g_doorLock.relock();       // 触发复位(上锁)
- *  }
- *
- *  // 3. 紧急停止
- *  g_doorMotor.emergencyStop();   // 立即停止开门电机
- *  g_doorLock.emergencyStop();    // 立即停止门锁电机
- *
- *  // 4. 状态查询
- *  bool opening   = g_doorMotor.isDoorOpening();
- *  bool closing   = g_doorMotor.isDoorClosing();
- *  bool doorOpen  = g_doorMotor.isDoorOpen();
- *  bool doorClose = g_doorMotor.isDoorClosed();
- *  bool locked    = g_doorLock.isLocked();
- *  bool unlocked  = g_doorLock.isUnlocked();
- *  bool lockRun   = g_doorLock.isLockRunning();
- * ============================================================
+ * 软件分层架构:
+ *   应用编排层 (本文件) → 业务模块层 (lib/door_lock, door_motor, ...)
+ *     → BSP 硬件抽象层 (lib/bsp) → Arduino-ESP32 框架 → 物理硬件
  */
 
 #include <Arduino.h>
 #include "app_config.h"
+
+// BSP 硬件抽象层
+#include "bsp_system.h"
+#include "bsp_uart.h"
 
 // 核心驱动模块 (高内聚, 低耦合)
 #include "door_lock.h"
@@ -121,17 +94,14 @@ static void executeFullClose() {
 //  Arduino setup()
 // ============================================================
 void setup() {
-    // USB 调试串口
-    Serial.begin(115200);
-    // 等待串口就绪 (最长 3 秒, 避免无 USB 时永久阻塞)
-    unsigned long serialTimeout = millis() + 3000;
-    while (!Serial && millis() < serialTimeout) { ; }
-    Serial.println(F("========================================"));
-    Serial.println(F(" ESP32 Smart Door Controller"));
-    Serial.println(F(" Hardware: ESP32-WROOM-32UE-N4"));
-    Serial.println(F("========================================"));
+    // USB 调试串口初始化 (通过 BSP 层)
+    bsp::uart::initDebug(115200);
+    bsp::uart::waitDebugReady(3000);
 
-    // 初始化核心驱动模块
+    // 系统横幅打印 + 硬件初始化 (GPIO/LEDC/限位开关/FG中断)
+    bsp::system::init();
+
+    // 初始化核心驱动模块 (业务状态)
     g_doorLock.init();
     g_doorMotor.init();
 

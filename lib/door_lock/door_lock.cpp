@@ -10,11 +10,16 @@
  * 状态机流程:
  *   IDLE -> UNLOCKING (开锁电机运行) -> [开锁限位触发] -> IDLE (已开)
  *   IDLE -> WAIT_RELOCK (等待3秒或门关闭) -> RELICKING (复位电机运行) -> [复位限位触发] -> IDLE (已锁)
+ *
+ * 硬件依赖: 全部通过 BSP 层访问，不直接调用 Arduino API
+ *   - GPIO 控制 → bsp::gpio
+ *   - 限位开关  → bsp::limits
  */
 
 #include "door_lock.h"
 #include "door_motor.h"
-#include "test_mode.h"
+#include "bsp_gpio.h"
+#include "bsp_limits.h"
 
 // ==================== 全局单例 ====================
 DoorLock g_doorLock;
@@ -22,16 +27,13 @@ DoorLock g_doorLock;
 // ==================== 生命周期 ====================
 void DoorLock::init() {
     // 配置 L9110S 驱动引脚
-    pinMode(PIN_LOCK_OPEN_MOTOR, OUTPUT);
-    pinMode(PIN_LOCK_RESET_MOTOR, OUTPUT);
+    bsp::gpio::initOutput(PIN_LOCK_OPEN_MOTOR);
+    bsp::gpio::initOutput(PIN_LOCK_RESET_MOTOR);
 
     // 默认安全状态: 两个电机都关闭 (互锁)
     stopAllMotors();
 
-    // 配置限位开关引脚
-    pinMode(PIN_LOCK_OPEN_LIMIT, INPUT_PULLUP);
-    pinMode(PIN_LOCK_CLOSE_LIMIT, INPUT_PULLUP);
-
+    // 限位开关统一由 BSP 初始化, 此处不再初始化
     state = State::IDLE;
     actionStartTime = 0;
 
@@ -166,30 +168,28 @@ bool DoorLock::isRelocking() const {
 
 void DoorLock::startUnlockMotor() {
     // L9110S 互锁: 先确保复位电机关闭, 再开启开锁电机
-    digitalWrite(PIN_LOCK_RESET_MOTOR, LOW);
-    digitalWrite(PIN_LOCK_OPEN_MOTOR, HIGH);
+    bsp::gpio::writeLow(PIN_LOCK_RESET_MOTOR);
+    bsp::gpio::writeHigh(PIN_LOCK_OPEN_MOTOR);
 }
 
 void DoorLock::stopAllMotors() {
     // 安全状态: 两个电机都关闭
-    digitalWrite(PIN_LOCK_OPEN_MOTOR, LOW);
-    digitalWrite(PIN_LOCK_RESET_MOTOR, LOW);
+    bsp::gpio::writeLow(PIN_LOCK_OPEN_MOTOR);
+    bsp::gpio::writeLow(PIN_LOCK_RESET_MOTOR);
 }
 
 void DoorLock::startRelockMotor() {
     // L9110S 互锁: 先确保开锁电机关闭, 再开启复位电机
-    digitalWrite(PIN_LOCK_OPEN_MOTOR, LOW);
-    digitalWrite(PIN_LOCK_RESET_MOTOR, HIGH);
+    bsp::gpio::writeLow(PIN_LOCK_OPEN_MOTOR);
+    bsp::gpio::writeHigh(PIN_LOCK_RESET_MOTOR);
 }
 
-// ==================== 限位开关读取 ====================
+// ==================== 限位开关读取 (通过 BSP 层) ====================
 
 bool DoorLock::isOpenLimit() const {
-    if (g_testMode.isActive()) return g_testMode.getLockOpenLimit();
-    return digitalRead(PIN_LOCK_OPEN_LIMIT) == LOW;
+    return bsp::limits::isLockOpenTriggered();
 }
 
 bool DoorLock::isCloseLimit() const {
-    if (g_testMode.isActive()) return g_testMode.getLockCloseLimit();
-    return digitalRead(PIN_LOCK_CLOSE_LIMIT) == LOW;
+    return bsp::limits::isLockCloseTriggered();
 }

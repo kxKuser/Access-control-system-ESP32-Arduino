@@ -1,14 +1,18 @@
 /**
  * @file rs232_comm.cpp
  * @brief RS232 串口通信模块 - 实现
+ *
+ * 硬件依赖: 全部通过 BSP 层访问
+ *   - UART2 → bsp::uart
  */
 
 #include "rs232_comm.h"
+#include "bsp_uart.h"
 
 Rs232Comm g_rs232;
 
 void Rs232Comm::init() {
-    Serial2.begin(RS232_BAUDRATE, SERIAL_8N1, PIN_RS232_RX, PIN_RS232_TX);
+    bsp::uart::initRs232(RS232_BAUDRATE, PIN_RS232_RX, PIN_RS232_TX);
     openCommandPending = false;
     lockoutActive = false;
     lockoutStartTime = 0;
@@ -27,8 +31,8 @@ void Rs232Comm::loop() {
     }
 
     // 非阻塞串口接收, 逐字节解析协议帧
-    while (Serial2.available()) {
-        uint8_t byte = Serial2.read();
+    while (bsp::uart::rs232Available()) {
+        uint8_t byte = bsp::uart::rs232Read();
         processByte(byte);
     }
 }

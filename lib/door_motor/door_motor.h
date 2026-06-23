@@ -14,6 +14,10 @@
  *   - PIN_MOTOR_PWM    (GPIO15): PWM 输出 (LEDC, 0-255)
  *   - PIN_MOTOR_SPEED_FB (GPIO13): FG 转速反馈 (脉冲输入)
  *
+ * 硬件依赖: 全部通过 BSP 层访问
+ *   - GPIO/PWM/FG → bsp::motor_pwm
+ *   - 限位开关     → bsp::limits
+ *
  * 外部调用方: key_input, rs232_comm, blinker_cloud (通过统一接口触发开门/关门/停止)
  */
 
@@ -58,7 +62,7 @@ public:
     bool isDoorClosed() const;    // 门已关闭 (锁门限位触发)
     bool isRunning() const;       // 电机是否在运行 (任何方向)
     bool isStalled() const;       // 是否检测到堵转
-    uint8_t getCurrentPwm() const { return currentPwm; }  // 当前 PWM 值
+    uint8_t getCurrentPwm() const; // 当前 PWM 值
 
 private:
     // ==================== 内部状态机 ====================
@@ -75,7 +79,6 @@ private:
 
     // ==================== PWM 渐变控制 ====================
     unsigned long lastRampTime;   // 上次 PWM 步进时间
-    uint8_t currentPwm;           // 当前 PWM 值
     uint8_t targetPwm;            // 目标 PWM 值
 
     void setPwm(uint8_t value);
@@ -83,20 +86,18 @@ private:
     void setDirection(bool forward); // true=正转开门, false=反转关门
 
     // ==================== FG 堵转检测 ====================
-    volatile unsigned long fgPulseCount;  // FG 脉冲计数 (中断中递增)
-    unsigned long lastFgCheckTime;        // 上次检查 FG 的时间
-    unsigned long lastFgPulseTime;        // 上次检测到 FG 脉冲的时间
-    unsigned long prevFgPulseCount;       // 上一次检测时的脉冲计数 (用于增量检测)
+    // FG 脉冲计数器由 BSP 层管理 (bsp::motor_pwm)
+    // 此处仅保留本地 delta 追踪变量用于堵转判定
+    uint32_t prevFgPulseCount;          // 上一次检测时的脉冲计数 (用于增量检测)
+    unsigned long lastFgPulseTime;      // 上次检测到 FG 脉冲的时间
 
-    static void fgIsrStub();      // 中断服务程序存根 (static)
-    void fgIsr();                 // 实际中断处理
     void checkStall();            // 堵转检测逻辑 (在 loop 中调用)
 
     // ==================== 超时保护 ====================
     unsigned long actionStartTime;  // 当前动作开始时间
     bool stalled;                   // 堵转标志
 
-    // ==================== 限位开关读取 ====================
+    // ==================== 限位开关读取 (通过 BSP 层) ====================
     bool isFullOpenLimit() const;   // 开门到位限位
     bool isClosedLimit() const;     // 关门到位限位
 };

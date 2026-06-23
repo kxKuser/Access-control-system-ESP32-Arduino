@@ -1,11 +1,17 @@
 /**
  * @file test_mode.cpp
  * @brief 测试模式模块 - 实现
+ *
+ * 测试模式下通过 BSP 层读写硬件:
+ *   - 限位开关 → 通过 BSP limits 读取 (BSP 内部处理虚拟/真实切换)
+ *   - FG 脉冲   → 通过 BSP motor_pwm 注入 (不再直接操作门电机)
+ *   - GPIO 读取 → 通过 bsp::gpio
  */
 
 #include "test_mode.h"
 #include "door_lock.h"
 #include "door_motor.h"
+#include "bsp_motor_pwm.h"
 
 TestMode g_testMode;
 
@@ -39,29 +45,32 @@ bool TestMode::isActive() const {
     return active;
 }
 
-// ==================== 虚拟限位开关读取 ====================
+// ============================================================
+//  虚拟限位开关读取
+//  注意: 这些函数仅返回虚拟值，由 BSP limits 层决定何时使用。
+//        当测试模式激活时 BSP limits 调用这些函数;
+//        当测试模式未激活时 BSP limits 直接读取硬件 GPIO。
+// ============================================================
 
 bool TestMode::getDoorFullOpenLimit() const {
-    if (!active) return digitalRead(PIN_DOOR_FULL_OPEN) == LOW;
     return vDoorFullOpenLimit;
 }
 
 bool TestMode::getDoorClosedLimit() const {
-    if (!active) return digitalRead(PIN_DOOR_CLOSED) == LOW;
     return vDoorClosedLimit;
 }
 
 bool TestMode::getLockOpenLimit() const {
-    if (!active) return digitalRead(PIN_LOCK_OPEN_LIMIT) == LOW;
     return vLockOpenLimit;
 }
 
 bool TestMode::getLockCloseLimit() const {
-    if (!active) return digitalRead(PIN_LOCK_CLOSE_LIMIT) == LOW;
     return vLockCloseLimit;
 }
 
-// ==================== 虚拟 FG 脉冲 ====================
+// ============================================================
+//  虚拟 FG 脉冲 (保留接口兼容, 实际注入通过 BSP motor_pwm)
+// ============================================================
 
 uint32_t TestMode::getFgPulseCount() const {
     return vFgPulseCount;
@@ -71,7 +80,9 @@ void TestMode::consumeFgPulses() {
     vFgPulseCount = 0;
 }
 
-// ==================== 串口命令处理 ====================
+// ============================================================
+//  串口命令处理
+// ============================================================
 
 void TestMode::processSerial() {
     if (!Serial.available()) return;
@@ -155,11 +166,13 @@ void TestMode::processSerial() {
                 Serial.println(vLockCloseLimit ? F("ON") : F("OFF"));
                 break;
 
-            case 'f': // 模拟 FG 脉冲
+            case 'f': // 模拟 FG 脉冲 (通过 BSP 注入)
                 if (value >= '0' && value <= '9') {
-                    vFgPulseCount += (uint32_t)(value - '0');
+                    uint32_t count = (uint32_t)(value - '0');
+                    vFgPulseCount += count;             // 保留本地计数用于 sendStatus
+                    bsp::motor_pwm::injectFgPulses(count); // 注入到 BSP 层
                     Serial.print(F("OK FG_PULSES+="));
-                    Serial.println(value - '0');
+                    Serial.println(count);
                 } else {
                     Serial.println(F("ERR Invalid FG count"));
                 }

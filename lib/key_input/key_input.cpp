@@ -1,12 +1,16 @@
 /**
  * @file key_input.cpp
  * @brief 按键输入模块 - 实现
+ *
+ * 硬件依赖: 全部通过 BSP 层访问
+ *   - GPIO → bsp::gpio
  */
 
 #include "key_input.h"
 #include "door_lock.h"
 #include "door_motor.h"
 #include "rs232_comm.h"
+#include "bsp_gpio.h"
 
 KeyInput g_keyInput;
 
@@ -87,12 +91,12 @@ void KeyInput::initKey(KeyState& key, uint8_t pin) {
     key.pressStartTime = 0;
     key.pressed = false;
     key.longPressFired = false;
-    pinMode(pin, INPUT_PULLUP);
+    bsp::gpio::initInputPullup(pin);
 }
 
 bool KeyInput::updateKey(KeyState& key) {
     bool changed = false;
-    uint8_t level = digitalRead(key.pin);
+    bool level = bsp::gpio::read(key.pin);
     unsigned long now = millis();
 
     if (level != key.lastLevel) {
