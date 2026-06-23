@@ -57,6 +57,9 @@
 #include "door_lock.h"
 #include "door_motor.h"
 
+// 测试模式模块 (PC 串口工具联调)
+#include "test_mode.h"
+
 // 通信与控制模块 (依赖核心驱动)
 #include "rs232_comm.h"
 #include "key_input.h"
@@ -120,7 +123,9 @@ static void executeFullClose() {
 void setup() {
     // USB 调试串口
     Serial.begin(115200);
-    while (!Serial) { ; }
+    // 等待串口就绪 (最长 3 秒, 避免无 USB 时永久阻塞)
+    unsigned long serialTimeout = millis() + 3000;
+    while (!Serial && millis() < serialTimeout) { ; }
     Serial.println(F("========================================"));
     Serial.println(F(" ESP32 Smart Door Controller"));
     Serial.println(F(" Hardware: ESP32-WROOM-32UE-N4"));
@@ -129,6 +134,9 @@ void setup() {
     // 初始化核心驱动模块
     g_doorLock.init();
     g_doorMotor.init();
+
+    // 初始化测试模式 (PC 串口工具联调)
+    g_testMode.init();
 
     // 初始化通信与控制模块
     g_rs232.init();
@@ -203,6 +211,9 @@ void taskCom(void* pvParameters) {
     const TickType_t xPeriod = pdMS_TO_TICKS(20); // 20ms 周期
 
     for (;;) {
+        // 测试模式轮询 (USB Serial 命令处理)
+        g_testMode.loop(30000);  // 30秒无命令自动退出测试模式
+
         // RS232 串口接收处理
         g_rs232.loop();
 
@@ -216,11 +227,27 @@ void taskCom(void* pvParameters) {
         // Blinker 云平台轮询
         g_blinker.loop();
 
-        // 处理 Blinker 远程开门请求
-        if (g_blinker.hasRemoteOpenRequest()) {
-            g_blinker.consumeRemoteOpenRequest();
-            Serial.println(F("[SYS] Blinker remote open request"));
-            executeFullOpen();
+        // 处理 Blinker 远程命令
+        RemoteCmd cmd = g_blinker.getRemoteCmd();
+        if (cmd != RemoteCmd::NONE) {
+            g_blinker.clearRemoteCmd();
+            switch (cmd) {
+                case RemoteCmd::OPEN_DOOR:
+                    Serial.println(F("[SYS] Blinker remote OPEN"));
+                    executeFullOpen();
+                    break;
+                case RemoteCmd::CLOSE_DOOR:
+                    Serial.println(F("[SYS] Blinker remote CLOSE"));
+                    executeFullClose();
+                    break;
+                case RemoteCmd::STOP:
+                    Serial.println(F("[SYS] Blinker remote STOP"));
+                    g_doorMotor.emergencyStop();
+                    g_doorLock.emergencyStop();
+                    break;
+                default:
+                    break;
+            }
         }
 
         vTaskDelayUntil(&xLastWakeTime, xPeriod);

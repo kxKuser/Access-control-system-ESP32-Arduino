@@ -11,6 +11,7 @@
  */
 
 #include "door_motor.h"
+#include "test_mode.h"
 
 // ==================== 全局单例 ====================
 DoorMotor g_doorMotor;
@@ -37,6 +38,7 @@ void DoorMotor::init() {
 
     // 初始化 FG 中断
     fgPulseCount = 0;
+    prevFgPulseCount = 0;
     lastFgCheckTime = 0;
     lastFgPulseTime = 0;
     attachInterrupt(digitalPinToInterrupt(PIN_MOTOR_SPEED_FB), fgIsrStub, FALLING);
@@ -117,6 +119,7 @@ void DoorMotor::open() {
     // 重置状态
     stalled = false;
     fgPulseCount = 0;
+    prevFgPulseCount = 0;
     lastFgPulseTime = millis();
     actionStartTime = millis();
     currentPwm = 0;
@@ -139,6 +142,7 @@ void DoorMotor::close() {
     // 重置状态
     stalled = false;
     fgPulseCount = 0;
+    prevFgPulseCount = 0;
     lastFgPulseTime = millis();
     actionStartTime = millis();
     currentPwm = 0;
@@ -235,7 +239,7 @@ void IRAM_ATTR DoorMotor::fgIsrStub() {
 
 void IRAM_ATTR DoorMotor::fgIsr() {
     fgPulseCount++;
-    lastFgPulseTime = millis();
+    // 不在此调用 millis(), 由 loop() 中的 checkStall() 记录时间戳
 }
 
 void DoorMotor::checkStall() {
@@ -247,10 +251,25 @@ void DoorMotor::checkStall() {
         return;
     }
 
+    // 刷新 FG 脉冲时间戳 (在 loop 中安全调用 millis)
+    // 通过对比上一个周期和当前周期的脉冲计数判断是否有新脉冲
+    if (fgPulseCount != prevFgPulseCount) {
+        lastFgPulseTime = now;
+        prevFgPulseCount = fgPulseCount;
+    }
+
+    // 测试模式下使用虚拟 FG 脉冲
+    if (g_testMode.isActive()) {
+        fgPulseCount += g_testMode.getFgPulseCount();
+        if (g_testMode.getFgPulseCount() > 0) {
+            lastFgPulseTime = now;  // 模拟脉冲更新最后脉冲时间
+        }
+        g_testMode.consumeFgPulses();
+    }
+
     // 检查 FG 是否有脉冲
     unsigned long sinceLastPulse = now - lastFgPulseTime;
     if (sinceLastPulse > MOTOR_STALL_TIMEOUT) {
-        // FG 长时间无脉冲 -> 堵转
         stalled = true;
     }
 }
@@ -258,11 +277,11 @@ void DoorMotor::checkStall() {
 // ==================== 限位开关读取 ====================
 
 bool DoorMotor::isFullOpenLimit() const {
-    // PIN_DOOR_FULL_OPEN (GPIO4): LOW = 开门到位
+    if (g_testMode.isActive()) return g_testMode.getDoorFullOpenLimit();
     return digitalRead(PIN_DOOR_FULL_OPEN) == LOW;
 }
 
 bool DoorMotor::isClosedLimit() const {
-    // PIN_DOOR_CLOSED (GPIO16): LOW = 关门到位
+    if (g_testMode.isActive()) return g_testMode.getDoorClosedLimit();
     return digitalRead(PIN_DOOR_CLOSED) == LOW;
 }

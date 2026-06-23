@@ -58,6 +58,7 @@ public:
     bool isDoorClosed() const;    // 门已关闭 (锁门限位触发)
     bool isRunning() const;       // 电机是否在运行 (任何方向)
     bool isStalled() const;       // 是否检测到堵转
+    uint8_t getCurrentPwm() const { return currentPwm; }  // 当前 PWM 值
 
 private:
     // ==================== 内部状态机 ====================
@@ -85,6 +86,7 @@ private:
     volatile unsigned long fgPulseCount;  // FG 脉冲计数 (中断中递增)
     unsigned long lastFgCheckTime;        // 上次检查 FG 的时间
     unsigned long lastFgPulseTime;        // 上次检测到 FG 脉冲的时间
+    unsigned long prevFgPulseCount;       // 上一次检测时的脉冲计数 (用于增量检测)
 
     static void fgIsrStub();      // 中断服务程序存根 (static)
     void fgIsr();                 // 实际中断处理

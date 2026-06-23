@@ -1,0 +1,78 @@
+====================================================================
+ESP32 智能门锁主控板 - 代码审查报告
+生成时间: 2026-06-20
+状态: [已修复] = 已修复, [待修复] = 未处理
+====================================================================
+
+一、严重缺陷 (必须修复)
+--------------------------------------------------------------------
+
+[BUG-01] [已修复] lib/door_lock/door_lock.cpp:68 - WAIT_RELOCK 检查了错误的限位开关
+  位置: DoorLock::loop() case State::WAIT_RELOCK
+  问题: "bool doorClosed = isCloseLimit();" 读取的是 PIN_LOCK_CLOSE_LIMIT
+        (GPIO18, 门锁复位限位)，而非门位置限位 PIN_DOOR_CLOSED (GPIO16)。
+  需求: "检测到门限位开关回到锁门状态也门锁电机复位" 指的是门位置限位开关。
+  修复: 改为 g_doorMotor.isDoorClosed()，并添加 #include "door_motor.h"
+        在 door_lock.cpp 中。
+
+[BUG-02] [已修复] lib/rs232_comm/rs232_comm.cpp:34-38 - 协议帧解析未实现
+  问题: processByte() 函数体为空。
+  修复: 实现完整的四状态机解析:
+        WAIT_HEADER1 -> WAIT_HEADER2 -> WAIT_CMD -> WAIT_CHECKSUM
+        含帧头容错 (帧头2不对时检查是否为新帧头1) 和异或校验。
+
+[BUG-03] [已修复] lib/door_motor/door_motor.cpp:237-239 - ISR 中调用 millis()
+  问题: fgIsr() 中断服务函数中调用了 millis()。
+  修复: ISR 中仅累加 fgPulseCount，在 loop() 的 checkStall() 中
+        通过比较 prevFgPulseCount 与 fgPulseCount 增量来更新时间戳。
+        将 prevFgPulseCount 改为实例成员变量 (之前是 static)。
+
+[BUG-04] [已修复] lib/key_input/key_input.cpp:65-67 - 反锁功能未实现
+  问题: onStopLongPress() 仅有 TODO 注释。
+  修复: 实现 toggle lockout 功能:
+        - 长按停止键切换反锁状态
+        - 通过 g_rs232.setLockout() 设置反锁标志
+        - RS232 的 hasOpenCommand() 在反锁时返回 false
+        - 按键和 Blinker 远程指令不受反锁影响 (符合需求)
+        - 30秒自动超时解除反锁
+
+二、设计缺陷 (重要)
+--------------------------------------------------------------------
+
+[DESIGN-01] [已修复] lib/status_manager/ 模块完全冗余
+  问题: StatusManager 与 DoorLock/DoorMotor 功能重叠，未被引用。
+  修复: 删除 status_manager.h 和 status_manager.cpp。
+
+[DESIGN-02] [待修复] lib/door_lock/door_lock.cpp 对 test_mode.h 的编译期耦合
+  问题: door_lock.cpp #include "test_mode.h"，生产固件不需要。
+  建议: 使用 #ifdef TEST_MODE_ENABLED 条件编译隔离。(低优先级)
+
+[DESIGN-03] [待修复] lib/door_motor/door_motor.cpp 对 test_mode.h 的编译期耦合
+  问题: 同上。
+  建议: 使用 #ifdef TEST_MODE_ENABLED 条件编译隔离。(低优先级)
+
+[DESIGN-04] [已修复] DoorLock 模块缺少对 DoorMotor 门位置的状态感知
+  问题: relock() 需要知道"门是否已关闭"。
+  修复: door_lock.cpp 添加 #include "door_motor.h"，
+        在 WAIT_RELOCK 中调用 g_doorMotor.isDoorClosed()。
+
+三、已完成的增强功能
+--------------------------------------------------------------------
+
+[ENH-01] BlinkerCloud 状态上报加入反锁状态
+  新增: DeviceStatus::lockout 字段，v-lockout 虚拟数据上报。
+
+[ENH-02] RS232 模块增加反锁管理接口
+  新增: setLockout(bool), isLockedOut() 方法。
+  反锁期间 hasOpenCommand() 返回 false，自动拦截开门指令。
+
+[ENH-03] 按键紧急停止同步停止门锁电机
+  onStopShortPress() 现在同时调用 g_doorMotor.emergencyStop()
+  和 g_doorLock.emergencyStop()。
+
+====================================================================
+修复小结
+--------------------------------------------------------------------
+已修复: BUG-01, BUG-02, BUG-03, BUG-04, DESIGN-01, DESIGN-04
+待修复: DESIGN-02, DESIGN-03 (低优先级，采用 #ifdef 条件编译)
+

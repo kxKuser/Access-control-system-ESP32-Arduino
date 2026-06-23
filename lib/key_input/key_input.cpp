@@ -6,6 +6,7 @@
 #include "key_input.h"
 #include "door_lock.h"
 #include "door_motor.h"
+#include "rs232_comm.h"
 
 KeyInput g_keyInput;
 
@@ -59,11 +60,19 @@ void KeyInput::onClosePress() {
 void KeyInput::onStopShortPress() {
     Serial.println(F("[KEY] Stop key short press - motor stop"));
     g_doorMotor.emergencyStop();
+    g_doorLock.emergencyStop();
 }
 
 void KeyInput::onStopLongPress() {
-    Serial.println(F("[KEY] Stop key long press - lockout"));
-    // TODO: 实现反锁逻辑
+    Serial.println(F("[KEY] Stop key long press - toggle lockout"));
+    // 切换反锁状态: 已反锁则解除, 未反锁则启用
+    if (g_rs232.isLockedOut()) {
+        g_rs232.setLockout(false);
+        Serial.println(F("[KEY] Lockout DISABLED - RS232 commands restored"));
+    } else {
+        g_rs232.setLockout(true);
+        Serial.println(F("[KEY] Lockout ENABLED - RS232 commands blocked, keys/remote only"));
+    }
 }
 
 // ============================================================

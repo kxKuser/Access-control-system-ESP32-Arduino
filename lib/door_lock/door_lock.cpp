@@ -13,6 +13,8 @@
  */
 
 #include "door_lock.h"
+#include "door_motor.h"
+#include "test_mode.h"
 
 // ==================== 全局单例 ====================
 DoorLock g_doorLock;
@@ -62,9 +64,10 @@ void DoorLock::loop() {
             break;
 
         case State::WAIT_RELOCK: {
-            // 等待条件: 3秒延时 或 门关闭限位触发
+            // 等待条件: 3秒延时 或 门位置限位回到锁门状态
+            // 需求: "检测到门限位开关回到锁门状态也门锁电机复位"
             bool timeElapsed = (now - actionStartTime) >= LOCK_RESET_DELAY;
-            bool doorClosed = isCloseLimit();
+            bool doorClosed = g_doorMotor.isDoorClosed();
 
             if (timeElapsed || doorClosed) {
                 state = State::RELICKING;
@@ -182,11 +185,11 @@ void DoorLock::startRelockMotor() {
 // ==================== 限位开关读取 ====================
 
 bool DoorLock::isOpenLimit() const {
-    // PIN_LOCK_OPEN_LIMIT (GPIO19): LOW = 门锁已开到位
+    if (g_testMode.isActive()) return g_testMode.getLockOpenLimit();
     return digitalRead(PIN_LOCK_OPEN_LIMIT) == LOW;
 }
 
 bool DoorLock::isCloseLimit() const {
-    // PIN_LOCK_CLOSE_LIMIT (GPIO18): LOW = 门已锁到位
+    if (g_testMode.isActive()) return g_testMode.getLockCloseLimit();
     return digitalRead(PIN_LOCK_CLOSE_LIMIT) == LOW;
 }

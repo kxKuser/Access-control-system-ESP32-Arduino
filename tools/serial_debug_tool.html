@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ESP32 智能门锁 - 串口测试工具</title>
+<style>
+:root {
+  --bg: #1a1d23;
+  --panel: #21252b;
+  --border: #333842;
+  --text: #c8ccd4;
+  --text-secondary: #7f848e;
+  --green: #98c379;
+  --red: #e06c75;
+  --blue: #61afef;
+  --yellow: #e5c07b;
+  --orange: #d19a66;
+  --btn-open: #27ae60;
+  --btn-close: #e74c3c;
+  --btn-stop: #f39c12;
+  --btn-limit-on: #27ae60;
+  --btn-limit-off: #7f8c8d;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Segoe UI', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  user-select: none;
+}
+.container {
+  width: 720px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.header h1 {
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--blue);
+  margin-bottom: 4px;
+}
+.header p {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+/* ---- Serial connect bar ---- */
+.serial-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+.serial-bar label { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.serial-bar select {
+  flex: 1;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  outline: none;
+}
+.serial-bar select:focus { border-color: var(--blue); }
+.btn-connect, .btn-disconnect {
+  padding: 6px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn-connect { background: var(--green); color: #1a1d23; }
+.btn-connect:hover { background: #7fb85a; }
+.btn-disconnect { background: var(--red); color: #fff; display: none; }
+.btn-disconnect:hover { background: #c95b64; }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--red); flex-shrink: 0;
+}
+.status-dot.connected { background: var(--green); }
+
+/* ---- Main grid ---- */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.4fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+/* ---- Limit switch panels ---- */
+.limit-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.limit-panel h3 {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.limit-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 8px;
+  margin-bottom: 8px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: #fff;
+}
+.limit-btn.on { background: var(--btn-limit-on); }
+.limit-btn.off { background: var(--btn-limit-off); }
+.limit-btn.on.active { border-color: #fff; box-shadow: 0 0 12px rgba(39,174,96,0.5); }
+
+/* ---- Center action buttons ---- */
+.center-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+}
+.action-btn {
+  width: 140px;
+  height: 48px;
+  border: none;
+  border-radius: 10px;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  letter-spacing: 2px;
+  color: #fff;
+}
+.action-btn:active { transform: scale(0.95); }
+.btn-open  { background: var(--btn-open); }
+.btn-open:hover  { background: #219a52; }
+.btn-close { background: var(--btn-close); }
+.btn-close:hover { background: #d44637; }
+.btn-stop  { background: var(--btn-stop); color: #1a1d23; }
+.btn-stop:hover  { background: #e08e0b; }
+
+/* ---- FG pulse button ---- */
+.fg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.fg-row span {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.btn-fg {
+  padding: 6px 14px;
+  background: var(--orange);
+  color: #1a1d23;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn-fg:hover { background: #b87d4a; }
+
+/* ---- Status display ---- */
+.status-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+}
+.status-panel h3 {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.status-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 8px;
+}
+.status-item {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  text-align: center;
+}
+.status-item .label {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.status-item .value {
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.value.on { color: var(--green); }
+.value.off { color: var(--text-secondary); }
+.value.running { color: var(--yellow); }
+.value.stopped { color: var(--text-secondary); }
+
+/* ---- Log ---- */
+.log-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  max-height: 140px;
+  overflow-y: auto;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.log-panel .log-line { color: var(--text-secondary); }
+.log-panel .log-line.cmd { color: var(--yellow); }
+.log-panel .log-line.resp { color: var(--blue); }
+
+/* Footer */
+.footer {
+  text-align: center;
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>ESP32 智能门锁 · 串口调试工具</h1>
+    <p>通过 USB Serial 控制开门电机 & 门锁电机 | 模拟行程开关</p>
+  </div>
+
+  <!-- Serial connect -->
+  <div class="serial-bar">
+    <span class="status-dot" id="statusDot"></span>
+    <label for="portSelect">串口:</label>
+    <select id="portSelect"><option>-- 请选择串口 --</option></select>
+    <button class="btn-connect" id="btnConnect" onclick="connectSerial()">连接</button>
+    <button class="btn-disconnect" id="btnDisconnect" onclick="disconnectSerial()">断开</button>
+    <button class="btn-fg" onclick="refreshPorts()" style="margin-left:auto;">刷新</button>
+  </div>
+
+  <!-- Main grid: limit switches + action buttons -->
+  <div class="main-grid">
+    <!-- Left: Door limit switches -->
+    <div class="limit-panel">
+      <h3>门行程开关</h3>
+      <button class="limit-btn on" id="btnDoorOpenL" onclick="toggleLimit('d')">门全开限位 OFF</button>
+      <button class="limit-btn on active" id="btnDoorCloseL" onclick="toggleLimit('c')">门关闭限位 ON</button>
+    </div>
+
+    <!-- Center: Action buttons -->
+    <div class="center-panel">
+      <button class="action-btn btn-open" onclick="sendCmd('O')">开 门</button>
+      <button class="action-btn btn-close" onclick="sendCmd('C')">关 门</button>
+      <button class="action-btn btn-stop" onclick="sendCmd('S')">停 止</button>
+      <div class="fg-row">
+        <span>FG脉冲:</span>
+        <button class="btn-fg" onclick="sendCmd('f5')">+5 脉冲</button>
+        <button class="btn-fg" onclick="sendCmd('f1')">+1 脉冲</button>
+      </div>
+    </div>
+
+    <!-- Right: Lock limit switches -->
+    <div class="limit-panel">
+      <h3>门锁行程开关</h3>
+      <button class="limit-btn on" id="btnLockOpenL" onclick="toggleLimit('l')">锁已开限位 OFF</button>
+      <button class="limit-btn on active" id="btnLockCloseL" onclick="toggleLimit('r')">锁复位限位 ON</button>
+    </div>
+  </div>
+
+  <!-- Status display -->
+  <div class="status-panel">
+    <h3>设备状态 (每 500ms 自动刷新)</h3>
+    <div class="status-grid">
+      <div class="status-item">
+        <div class="label">门状态</div>
+        <div class="value off" id="stDoor">关门</div>
+      </div>
+      <div class="status-item">
+        <div class="label">锁状态</div>
+        <div class="value off" id="stLock">已锁</div>
+      </div>
+      <div class="status-item">
+        <div class="label">电机PWM</div>
+        <div class="value stopped" id="stPwm">0</div>
+      </div>
+      <div class="status-item">
+        <div class="label">堵转/错误</div>
+        <div class="value off" id="stErr">正常</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Log -->
+  <div class="log-panel" id="logPanel">
+    <div class="log-line">等待连接 ESP32 ...</div>
+  </div>
+
+  <div class="footer">协议: O=开门 C=关门 S=停止 d1/d0 c1/c0 l1/l0 r1/r0 fN ?=状态</div>
+</div>
+
+<script>
+// ==================== Global State ====================
+let port = null;
+let writer = null;
+let reader = null;
+let readerRunning = false;
+let statusTimer = null;
+
+// Limit switch states (mirror of ESP32 virtual switches)
+let limits = { d: false, c: true, l: false, r: true }; // 'c' and 'r' ON by default (door closed, locked)
+const limitLabels = { d: '门全开限位', c: '门关闭限位', l: '锁已开限位', r: '锁复位限位' };
+
+// Button mapping for limit switches
+const limitBtnIds = { d: 'btnDoorOpenL', c: 'btnDoorCloseL', l: 'btnLockOpenL', r: 'btnLockCloseL' };
+
+// ==================== Serial Functions ====================
+
+async function refreshPorts() {
+  const select = document.getElementById('portSelect');
+  select.innerHTML = '<option>-- 请选择串口 --</option>';
+  try {
+    const ports = await navigator.serial.getPorts();
+    ports.forEach(p => {
+      const info = p.getInfo();
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = `USB Serial (${info.usbVendorId?.toString(16) || '?'}:${info.usbProductId?.toString(16) || '?'})`;
+      opt._port = p;
+      select.appendChild(opt);
+    });
+    if (ports.length === 0) {
+      const opt = document.createElement('option');
+      opt.textContent = '未找到授权端口，请点击"连接"';
+      select.appendChild(opt);
+    }
+  } catch(e) {
+    logLine('获取端口列表失败: ' + e.message);
+  }
+}
+
+async function connectSerial() {
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+    writer = port.writable.getWriter();
+    logLine('串口已连接');
+    updateConnectionUI(true);
+    startReading();
+    startAutoStatus();
+  } catch(e) {
+    if (e.name !== 'AbortError') {
+      logLine('连接失败: ' + e.message);
+    }
+  }
+}
+
+async function disconnectSerial() {
+  stopAutoStatus();
+  stopReading();
+  if (writer) {
+    try { writer.close(); } catch(e) {}
+    writer = null;
+  }
+  if (port) {
+    try { await port.close(); } catch(e) {}
+    port = null;
+  }
+  logLine('串口已断开');
+  updateConnectionUI(false);
+}
+
+async function sendCmd(cmd) {
+  if (!writer) {
+    logLine('[错误] 请先连接串口');
+    return;
+  }
+  try {
+    const data = new TextEncoder().encode(cmd + '\n');
+    await writer.write(data);
+    logLine('>> ' + cmd, 'cmd');
+  } catch(e) {
+    logLine('发送失败: ' + e.message);
+    disconnectSerial();
+  }
+}
+
+async function startReading() {
+  if (readerRunning) return;
+  readerRunning = true;
+  const textDecoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (port && port.readable) {
+      reader = port.readable.getReader();
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += textDecoder.decode(value, { stream: true });
+          // Process complete lines
+          let idx;
+          while ((idx = buffer.indexOf('\n')) >= 0) {
+            const line = buffer.substring(0, idx).trim();
+            buffer = buffer.substring(idx + 1);
+            if (line) processResponse(line);
+          }
+        }
+      } catch(e) {
+        logLine('读取错误: ' + e.message);
+      } finally {
+        if (reader) {
+          try { reader.releaseLock(); } catch(e) {}
+          reader = null;
+        }
+      }
+    }
+  } catch(e) {}
+  readerRunning = false;
+}
+
+function stopReading() {
+  if (reader) {
+    try { reader.cancel(); } catch(e) {}
+    reader = null;
+  }
+  readerRunning = false;
+}
+
+// ==================== Response Processing ====================
+
+function processResponse(line) {
+  logLine('<< ' + line, 'resp');
+
+  if (line.startsWith('STATUS:')) {
+    // Parse status: doorOpen=0 doorClosed=1 isOpening=0 isClosing=0 lockLocked=1 lockUnlocked=0 lockRunning=0 motorPwm=0 ...
+    const parts = line.substring(7).trim().split(/\s+/);
+    const vals = {};
+    parts.forEach(p => {
+      const kv = p.split('=');
+      if (kv.length === 2) vals[kv[0]] = kv[1];
+    });
+
+    // Update door state
+    const doorOpen = vals['doorOpen'] === '1';
+    const doorClosed = vals['doorClosed'] === '1';
+    const isOpening = vals['isOpening'] === '1';
+    const isClosing = vals['isClosing'] === '1';
+
+    const doorEl = document.getElementById('stDoor');
+    if (isOpening) { doorEl.textContent = '开门中'; doorEl.className = 'value running'; }
+    else if (isClosing) { doorEl.textContent = '关门中'; doorEl.className = 'value running'; }
+    else if (doorOpen) { doorEl.textContent = '已开'; doorEl.className = 'value on'; }
+    else if (doorClosed) { doorEl.textContent = '关门'; doorEl.className = 'value off'; }
+    else { doorEl.textContent = '未知'; doorEl.className = 'value off'; }
+
+    // Update lock state
+    const lockLocked = vals['lockLocked'] === '1';
+    const lockUnlocked = vals['lockUnlocked'] === '1';
+    const lockRunning = vals['lockRunning'] === '1';
+
+    const lockEl = document.getElementById('stLock');
+    if (lockRunning) { lockEl.textContent = '运行中'; lockEl.className = 'value running'; }
+    else if (lockLocked) { lockEl.textContent = '已锁'; lockEl.className = 'value off'; }
+    else if (lockUnlocked) { lockEl.textContent = '已开'; lockEl.className = 'value on'; }
+    else { lockEl.textContent = '未知'; lockEl.className = 'value off'; }
+
+    // Update PWM
+    const pwmEl = document.getElementById('stPwm');
+    const pwm = parseInt(vals['motorPwm']) || 0;
+    pwmEl.textContent = pwm;
+    pwmEl.className = pwm > 0 ? 'value running' : 'value stopped';
+
+    // Update limit switch indicators from STATUS response
+    if (vals['doorLimitOpen'] !== undefined) limits.d = (vals['doorLimitOpen'] === 'ON');
+    if (vals['doorLimitClose'] !== undefined) limits.c = (vals['doorLimitClose'] === 'ON');
+    if (vals['lockLimitOpen'] !== undefined) limits.l = (vals['lockLimitOpen'] === 'ON');
+    if (vals['lockLimitClose'] !== undefined) limits.r = (vals['lockLimitClose'] === 'ON');
+
+    updateLimitUI();
+  }
+
+  if (line.startsWith('OK')) {
+    // Update limit switch states based on OK response
+    if (line.includes('DOOR_OPEN_LIMIT')) limits.d = line.includes('=ON');
+    if (line.includes('DOOR_CLOSE_LIMIT')) limits.c = line.includes('=ON');
+    if (line.includes('LOCK_OPEN_LIMIT')) limits.l = line.includes('=ON');
+    if (line.includes('LOCK_CLOSE_LIMIT')) limits.r = line.includes('=ON');
+    updateLimitUI();
+  }
+}
+
+// ==================== UI Updates ====================
+
+function updateConnectionUI(connected) {
+  document.getElementById('statusDot').classList.toggle('connected', connected);
+  document.getElementById('btnConnect').style.display = connected ? 'none' : '';
+  document.getElementById('btnDisconnect').style.display = connected ? '' : 'none';
+}
+
+function toggleLimit(key) {
+  limits[key] = !limits[key];
+  const cmd = key + (limits[key] ? '1' : '0');
+  sendCmd(cmd);
+  updateLimitUI();
+}
+
+function updateLimitUI() {
+  for (const [key, state] of Object.entries(limits)) {
+    const btn = document.getElementById(limitBtnIds[key]);
+    if (!btn) continue;
+    btn.textContent = limitLabels[key] + ' ' + (state ? 'ON' : 'OFF');
+    btn.className = 'limit-btn ' + (state ? 'on active' : 'off');
+  }
+}
+
+function startAutoStatus() {
+  stopAutoStatus();
+  statusTimer = setInterval(() => { sendCmd('?'); }, 500);
+}
+
+function stopAutoStatus() {
+  if (statusTimer) {
+    clearInterval(statusTimer);
+    statusTimer = null;
+  }
+}
+
+function logLine(msg, type) {
+  const panel = document.getElementById('logPanel');
+  const div = document.createElement('div');
+  div.className = 'log-line' + (type ? ' ' + type : '');
+  div.textContent = msg;
+  panel.appendChild(div);
+  panel.scrollTop = panel.scrollHeight;
+  // Keep max 100 lines
+  while (panel.children.length > 100) {
+    panel.removeChild(panel.firstChild);
+  }
+}
+
+// ==================== Init ====================
+refreshPorts();
+navigator.serial.addEventListener('connect', () => { logLine('串口设备已连接'); refreshPorts(); });
+navigator.serial.addEventListener('disconnect', () => {
+  logLine('串口设备已断开');
+  disconnectSerial();
+  updateConnectionUI(false);
+});
+
+updateLimitUI();
+</script>
+</body>
+</html>
